@@ -13,10 +13,10 @@ else:
     st.stop()
 # =========================================
 
-st.set_page_config(page_title="AI 旅遊菜單翻譯", page_icon="🌴")
+st.set_page_config(page_title="AI 菜單翻譯+發音", page_icon="🥘")
 
-st.title("🌴 峇里島/全球 菜單翻譯大師")
-st.write("自動偵測幣別 (IDR/USD/JPY)，幫你換算台幣、解釋菜色、計算稅金！")
+st.title("🥘 菜單翻譯 & 點餐語音助理")
+st.write("拍菜單 -> 翻譯 -> 幫你唸出來！")
 
 # 檢查 API Key
 if not api_key or "請填入" in api_key:
@@ -25,18 +25,20 @@ if not api_key or "請填入" in api_key:
 
 client = OpenAI(api_key=api_key)
 
-# 1. 讓使用者輸入禁忌
-preferences = st.text_input("🚫 飲食禁忌/過敏 (例如：不吃辣 No Spicy、不吃牛肉 No Beef)", "")
+# 1. 使用者禁忌
+preferences = st.text_input("🚫 飲食禁忌 (例如：不吃辣、不吃牛)", "")
 
 # 2. 上傳圖片
-uploaded_files = st.file_uploader("請拍攝/上傳菜單 (支援多張)...", 
+uploaded_files = st.file_uploader("請拍攝/上傳菜單...", 
                                   type=["jpg", "jpeg", "png"], 
                                   accept_multiple_files=True)
 
+# 存放翻譯結果，讓發音功能可以參考
+if "last_translation" not in st.session_state:
+    st.session_state.last_translation = ""
+
 if uploaded_files:
     if st.button('🚀 開始翻譯'):
-        
-        # 建立進度條
         progress_bar = st.progress(0)
         
         for index, uploaded_file in enumerate(uploaded_files):
@@ -44,47 +46,30 @@ if uploaded_files:
             st.subheader(f"📄 菜單 {index + 1}")
             st.image(uploaded_file, caption='原始菜單', use_container_width=True)
 
-            with st.spinner(f'AI 正在分析幣別與菜色...'):
+            with st.spinner(f'AI 正在分析並翻譯...'):
                 try:
-                    # 圖片轉碼
                     bytes_data = uploaded_file.getvalue()
                     base64_image = base64.b64encode(bytes_data).decode('utf-8')
 
-                    # ==========================================
-                    # 🌟 核心修改：針對峇里島優化的 Prompt
-                    # ==========================================
                     prompt_text = f"""
-                    你是一個精通全球旅遊的美食嚮導。請分析這張菜單圖片。
+                    你是一個精通全球美食的導遊。請分析這張菜單。
+                    使用者禁忌：{preferences}
 
-                    【使用者禁忌】：{preferences}
+                    請偵測幣別與菜色風格：
+                    - 若是 IDR/Rp：這裡是印尼/峇里島。
+                    - 若是 USD：這裡是美國。
 
-                    請先偵測圖片中的 **「貨幣單位」** 與 **「菜色風格」**，並依照以下邏輯處理：
+                    請用 Markdown 表格輸出：
+                    1. **原文菜名**
+                    2. **當地名稱** (若原文是英文但賣當地菜，請還原。如 Fried Rice -> Nasi Goreng)
+                    3. **中文翻譯與口感介紹**
+                    4. **價格**
+                    5. **約略台幣**
 
-                    1. **【場景判斷 - 關鍵！】**：
-                       - 如果幣別是 **IDR (Rp, 印尼盾)** 或數字為 **k 結尾 (如 50k)**：你現在在印尼/峇里島。
-                       - 如果幣別是 **USD ($)**：你現在在美國。
-                       - 其他：依照當地習慣。
-
-                    2. **【翻譯表格】** (請用 Markdown 表格輸出，包含以下欄位)：
-                       - **原文菜名**
-                       - **當地名稱** (若是英文菜單但賣當地菜，請還原。例如 Fried Rice -> Nasi Goreng；Duck -> Bebek)
-                       - **中文翻譯與口感** (請解釋食材與烹飪方式。例如：Babi Guling 是香料烤乳豬)
-                       - **價格** (原幣)
-                       - **約略台幣** (若為 IDR，請以 1k ≈ 2.1 TWD 快速換算；若為其他請依現匯率)
-
-                    3. **【峇里島/東南亞特別警示】** (若偵測到是此地區)：
-                       - **辣度提醒**：若含 "Sambal", "Pedas" 或紅色標示，請標註 🌶️。
-                       - **食材提醒**："Babi" 是豬肉 (峇里島常見)，"Ayam" 是雞肉，"Bebek" 是鴨肉，"Sapi" 是牛肉。
-                       - **衛生提醒**：若看起來是路邊攤 (Warung)，提醒注意冰塊與生菜。
-
-                    4. **【價格試算】**：
-                       - 如果是印尼盾 (IDR)，請在表格下方列出：「💰 價格可能需加收 10%~21% (Tax & Service)，換算台幣約 NT$ XXX」。
-                       - 如果是美金，請列出含稅+小費的預估金額。
-
-                    請直接輸出結果。
+                    若為峇里島，請提醒辣度(Sambal)與肉類(Babi/Bebek)。
+                    若為IDR，請提示價格可能需加收 Tax & Service。
                     """
 
-                    # 呼叫 OpenAI
                     response = client.chat.completions.create(
                         model="gpt-4o",
                         messages=[
@@ -104,14 +89,59 @@ if uploaded_files:
                         max_tokens=1500
                     )
                     
-                    # 顯示結果
                     result_text = response.choices[0].message.content
-                    st.markdown("### 🌴 翻譯與分析結果")
+                    st.session_state.last_translation = result_text # 存起來
+                    st.markdown("### 📋 翻譯結果")
                     st.markdown(result_text)
 
                 except Exception as e:
                     st.error(f"發生錯誤：{str(e)}")
             
             progress_bar.progress((index + 1) / len(uploaded_files))
+        st.success("翻譯完成！往下捲動可以使用「語音幫手」喔！👇")
 
-        st.success("🎉 分析完成！祝你用餐愉快！")
+# ==========================================
+# 🗣️ 新增功能：點餐語音幫手 (TTS)
+# ==========================================
+st.divider()
+st.header("🗣️ 點餐語音幫手")
+st.info("想點哪道菜？把上面的「原文」或「當地名稱」複製貼在下面，我唸給店員聽！")
+
+# 讓使用者輸入想聽的字
+text_to_speak = st.text_input("貼上你想唸的菜名 (例如: Nasi Goreng)", "")
+
+# 選擇語音風格
+voice_option = st.selectbox("選擇語音風格", ["alloy (中性)", "echo (沈穩)", "fable (活潑)", "onyx (低沈)", "nova (溫柔)", "shimmer (清晰)"], index=4)
+selected_voice = voice_option.split(" ")[0]
+
+if st.button("🔊 播放發音"):
+    if text_to_speak:
+        with st.spinner("正在生成語音..."):
+            try:
+                # 呼叫 OpenAI TTS API
+                response = client.audio.speech.create(
+                    model="tts-1",
+                    voice=selected_voice,
+                    input=text_to_speak
+                )
+                
+                # 直接播放
+                st.audio(response.content, format="audio/mp3")
+                st.success(f"正在播放：{text_to_speak}")
+                
+            except Exception as e:
+                st.error(f"語音生成失敗：{str(e)}")
+    else:
+        st.warning("請先輸入或是貼上文字喔！")
+
+# 懶人按鈕區
+st.write("或者直接點選常用句：")
+col1, col2 = st.columns(2)
+with col1:
+    if st.button("🇮🇩 印尼文：我不吃辣"):
+        res = client.audio.speech.create(model="tts-1", voice=selected_voice, input="Saya tidak makan pedas.")
+        st.audio(res.content)
+with col2:
+    if st.button("🇮🇩 印尼文：請給我這個"):
+        res = client.audio.speech.create(model="tts-1", voice=selected_voice, input="Saya mau pesan ini.")
+        st.audio(res.content)
